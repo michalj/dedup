@@ -7,9 +7,9 @@ fn main() {
     println!("Hello, world!");
     let (mut sender, receiver) = mpsc::unbounded_channel();
     sender.try_send(".".to_owned());
-    let go = receiver.for_each(move |path| {
+    let go = receiver.for_each(move |from_path| {
         let sender = sender.clone();
-        let do_one = tokio_fs::read_dir(path)
+        let do_one = tokio_fs::read_dir(from_path)
             .and_then(move |dir| {
                 let sender = sender.clone();
                 dir
@@ -28,7 +28,7 @@ fn main() {
                                 )
                             } else {
                                 EitherFuture::Right({
-                                    let sub_dir = format!("./{}", path.to_string_lossy());
+                                    let sub_dir = format!("{}", path.to_string_lossy());
                                     _sender.try_send(sub_dir).unwrap();
                                     future::ok(())
                                 })
