@@ -30,10 +30,7 @@ fn main() {
                                         .and_then(|handle| hash::first(handle, 1024))
                                         .map(move |h| {
                                             println!("file: {:?}, hash = {}", path, h);
-                                        }), //                                    tokio_fs::read(path.clone())
-                                            //                                        .map(move |chunk| {
-                                            //                                            println!("file: {:?}, size = {}, hash = {}", path, chunk.len(), hash(&chunk));
-                                            //                                        })
+                                        }),
                                 )
                             } else {
                                 EitherFuture::Right({
@@ -122,6 +119,68 @@ mod hash {
                     }
                 }
             }
+        }
+    }
+
+    mod tests {
+        use super::*;
+        use std::sync::{Arc, Mutex};
+        use tokio_fs::File;
+
+        fn hash_file(name: &str, first_bytes: usize) -> u64 {
+            // TODO: use tokio-test instead
+            let hash_holder: Arc<Mutex<u64>> = Arc::new(Mutex::new(0));
+            let hash_holder_write = hash_holder.clone();
+            let future = File::open(name.to_owned())
+                .and_then(move |stream| first(stream, first_bytes))
+                .map(move |hash| {
+                    hash_holder_write.lock().map(|mut result| {
+                        *result = hash;
+                    });
+                })
+                .map_err(|e| panic!(e));
+            tokio::run(future);
+            let result: u64 = *hash_holder.lock().unwrap();
+            result
+        }
+
+        #[test]
+        fn empty_file_should_hash_to_0() {
+            assert_eq!(0, hash_file("test_data/empty_file.txt", 1024));
+        }
+
+        #[test]
+        fn files_should_have_same_hash_given_same_prefix() {
+            assert_eq!(
+                hash_file("test_data/test_hash.txt", 3),
+                hash_file("test_data/prefix_of_test_hash.txt", 3)
+            );
+        }
+    }
+}
+
+mod search {
+    use std::path::PathBuf;
+    use tokio::prelude::*;
+
+    pub fn files_in_path<P: Into<PathBuf>>(path: P) -> SearchFuture {
+        SearchFuture {
+            to_visit: vec![path.into()],
+            files: vec![],
+        }
+    }
+
+    pub struct SearchFuture {
+        to_visit: Vec<PathBuf>,
+        files: Vec<PathBuf>,
+    }
+
+    impl Future for SearchFuture {
+        type Item = Vec<PathBuf>;
+        type Error = std::io::Error;
+
+        fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
+            unimplemented!()
         }
     }
 }
