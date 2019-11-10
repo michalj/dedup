@@ -1,6 +1,5 @@
 use tokio::prelude::*;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::error::UnboundedRecvError;
 use tokio_fs;
 
 fn main() {
@@ -99,8 +98,6 @@ mod hash {
             let mut buffer: [u8; 1024] = [0; 1024];
             let read = self.stream.poll_read(&mut buffer);
             match read {
-                Err(e) => Err(e),
-                Ok(Async::NotReady) => Ok(Async::NotReady),
                 Ok(Async::Ready(bytes_read)) => {
                     if bytes_read == 0 {
                         Ok(Async::Ready(self.hash))
@@ -118,6 +115,8 @@ mod hash {
                         }
                     }
                 }
+                Ok(Async::NotReady) => Ok(Async::NotReady),
+                Err(e) => Err(e),
             }
         }
     }
@@ -160,17 +159,21 @@ mod hash {
 }
 
 mod search {
+    use std::fs::FileType;
     use std::path::PathBuf;
     use tokio::prelude::*;
+    use tokio_fs;
 
     pub fn files_in_path<P: Into<PathBuf>>(path: P) -> SearchFuture {
         SearchFuture {
-            to_visit: vec![path.into()],
+            current: Box::new(read_dir(path.into())),
+            to_visit: vec![],
             files: vec![],
         }
     }
 
     pub struct SearchFuture {
+        current: Box<Future<Item = Vec<(PathBuf, FileType)>, Error = std::io::Error>>,
         to_visit: Vec<PathBuf>,
         files: Vec<PathBuf>,
     }
@@ -180,7 +183,76 @@ mod search {
         type Error = std::io::Error;
 
         fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
-            unimplemented!()
+            match self.current.poll() {
+                Ok(Async::Ready(content)) => {
+                    for (entry, entry_type) in content {
+                        if entry_type.is_file() {
+                            self.files.push(entry);
+                        } else if entry_type.is_dir() {
+                            self.to_visit.push(entry);
+                        }
+                    }
+                    if self.to_visit.is_empty() {
+                        Ok(Async::Ready(self.files.clone()))
+                    } else {
+                        self.current = Box::new(read_dir(self.to_visit.remove(0)));
+                        self.poll()
+                    }
+                }
+                Ok(Async::NotReady) => Ok(Async::NotReady),
+                Err(e) => Err(e),
+            }
+            // take each task, see if result is available
+            // create new tasks and files
+            // complete if all completed
+        }
+    }
+
+    unsafe impl Send for SearchFuture {
+    }
+
+    fn read_dir(
+        path: PathBuf,
+    ) -> impl Future<Item = Vec<(PathBuf, FileType)>, Error = std::io::Error> {
+        tokio_fs::read_dir(path).and_then(|dir| {
+            dir.and_then(|entry| {
+                let path = entry.path();
+                let file_type = future::poll_fn(move || entry.poll_file_type());
+                file_type.map(move |ft| (path, ft))
+            })
+            .collect()
+        })
+    }
+
+    mod tests {
+        use super::*;
+        use std::sync::{Arc, Mutex};
+
+        #[test]
+        fn read_test_data() {
+            //let output = tokio_test::block_on(files_in_path("test_data/"));
+            let output = block_on(files_in_path("test_data/"));
+            println!("output = {:?}", output);
+        }
+
+        fn block_on<T, E, F>(future: F) -> T
+        where
+            T: Send + 'static,
+            E: Send + 'static,
+            F: Future<Item = T, Error = E> + Send + 'static
+        {
+            let result_holder: Arc<Mutex<Option<T>>> = Arc::new(Mutex::new(None));
+            let result_holder_write = result_holder.clone();
+            let task = future
+                .map(move |output| {
+                    result_holder_write.lock().map(|mut result| {
+                        *result = Some(output);
+                    });
+                })
+                .map_err(|e| panic!(e));
+            tokio::run(task);
+            let result: Option<T> = result_holder.lock().unwrap().take();
+            result.unwrap()
         }
     }
 }
