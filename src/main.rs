@@ -173,7 +173,7 @@ mod search {
     }
 
     pub struct SearchFuture {
-        current: Box<Future<Item = Vec<(PathBuf, FileType)>, Error = std::io::Error>>,
+        current: Box<dyn Future<Item = Vec<(PathBuf, FileType)>, Error = std::io::Error>>,
         to_visit: Vec<PathBuf>,
         files: Vec<PathBuf>,
     }
@@ -208,8 +208,7 @@ mod search {
         }
     }
 
-    unsafe impl Send for SearchFuture {
-    }
+    unsafe impl Send for SearchFuture {}
 
     fn read_dir(
         path: PathBuf,
@@ -230,16 +229,22 @@ mod search {
 
         #[test]
         fn read_test_data() {
-            //let output = tokio_test::block_on(files_in_path("test_data/"));
             let output = block_on(files_in_path("test_data/"));
-            println!("output = {:?}", output);
+            assert_eq!(
+                output,
+                vec![
+                    PathBuf::from("test_data/prefix_of_test_hash.txt"),
+                    PathBuf::from("test_data/empty_file.txt"),
+                    PathBuf::from("test_data/test_hash.txt"),
+                ]
+            );
         }
 
         fn block_on<T, E, F>(future: F) -> T
         where
             T: Send + 'static,
             E: Send + 'static,
-            F: Future<Item = T, Error = E> + Send + 'static
+            F: Future<Item = T, Error = E> + Send + 'static,
         {
             let result_holder: Arc<Mutex<Option<T>>> = Arc::new(Mutex::new(None));
             let result_holder_write = result_holder.clone();
