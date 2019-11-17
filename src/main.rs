@@ -1,12 +1,18 @@
 use tokio::prelude::*;
 
 fn main() {
-    //let go = search::files_in_path("test_data").map(|file_paths| {
-
-        //tokio_fs::File::open(path.clone())
-        //hash::first()
-    //});
-    //tokio::run(go);
+    let go = search::files_in_path("test_data").and_then(|path| {
+        tokio_fs::File::open(path.clone()).and_then(|handle| {
+            hash::first(handle, 10).map(|h| {
+                (path, h)
+            })
+        })
+    }).collect().map(|result| {
+        println!("result: {:?}", result);
+    }).map_err(|e| {
+        println!("error: {:?}", e);
+    });
+    tokio::run(go);
 }
 
 enum EitherFuture<F1, F2> {
