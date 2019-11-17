@@ -15,25 +15,6 @@ fn main() {
     tokio::run(go);
 }
 
-enum EitherFuture<F1, F2> {
-    Left(F1),
-    Right(F2),
-}
-
-impl<I, E, F1: Future<Item = I, Error = E>, F2: Future<Item = I, Error = E>> Future
-    for EitherFuture<F1, F2>
-{
-    type Item = I;
-    type Error = E;
-
-    fn poll(&mut self) -> Result<Async<I>, E> {
-        match self {
-            EitherFuture::Left(f) => f.poll(),
-            EitherFuture::Right(f) => f.poll(),
-        }
-    }
-}
-
 mod hash {
     use std::cmp::min;
     use tokio::prelude::*;
@@ -148,7 +129,7 @@ mod search {
             if !self.files.is_empty() {
                 // a file is readily available
                 Ok(Async::Ready(Some(self.files.remove(0))))
-            } else if let Some(mut task) = self.current.as_mut() {
+            } else if let Some(task) = self.current.as_mut() {
                 // no ready files, but there is a task running
                 match task.poll() {
                     Ok(Async::Ready(content)) => {
