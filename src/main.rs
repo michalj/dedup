@@ -1,56 +1,12 @@
 use tokio::prelude::*;
-use tokio::sync::mpsc;
-use tokio_fs;
 
 fn main() {
-    println!("Hello, world!");
-    let (mut sender, receiver) = mpsc::unbounded_channel();
-    sender.try_send(".".to_owned());
-    let go = receiver
-        .for_each(move |from_path| {
-            let sender = sender.clone();
-            let do_one = tokio_fs::read_dir(from_path)
-                .and_then(move |dir| {
-                    let sender = sender.clone();
-                    dir.for_each(move |entry| {
-                        let mut _sender = sender.clone();
-                        println!("entry: {:?}", entry.path());
-                        let path = entry.path().clone();
-                        future::poll_fn(move || entry.poll_file_type()).and_then(move |file_type| {
-                            println!(
-                                "{:?}: f={:?}, d={:?}",
-                                path,
-                                file_type.is_file(),
-                                file_type.is_dir()
-                            );
-                            if file_type.is_file() {
-                                EitherFuture::Left(
-                                    tokio_fs::File::open(path.clone())
-                                        .and_then(|handle| hash::first(handle, 1024))
-                                        .map(move |h| {
-                                            println!("file: {:?}, hash = {}", path, h);
-                                        }),
-                                )
-                            } else {
-                                EitherFuture::Right({
-                                    let sub_dir = format!("{}", path.to_string_lossy());
-                                    _sender.try_send(sub_dir).unwrap();
-                                    future::ok(())
-                                })
-                            }
-                        })
-                    })
-                })
-                .map_err(|e| {
-                    eprintln!("Error doing one: {:?}", e);
-                });
-            tokio::spawn(do_one);
-            Ok(())
-        })
-        .map_err(|e| {
-            eprintln!("err: {:?}", e);
-        });
-    tokio::run(go);
+    //let go = search::files_in_path("test_data").map(|file_paths| {
+
+        //tokio_fs::File::open(path.clone())
+        //hash::first()
+    //});
+    //tokio::run(go);
 }
 
 enum EitherFuture<F1, F2> {
@@ -164,51 +120,57 @@ mod search {
     use tokio::prelude::*;
     use tokio_fs;
 
-    pub fn files_in_path<P: Into<PathBuf>>(path: P) -> SearchFuture {
-        SearchFuture {
-            current: Box::new(read_dir(path.into())),
+    pub fn files_in_path<P: Into<PathBuf>>(path: P) -> SearchStream {
+        SearchStream {
+            current: Some(Box::new(read_dir(path.into()))),
             to_visit: vec![],
             files: vec![],
         }
     }
 
-    pub struct SearchFuture {
-        current: Box<dyn Future<Item = Vec<(PathBuf, FileType)>, Error = std::io::Error>>,
+    pub struct SearchStream {
+        current: Option<Box<dyn Future<Item = Vec<(PathBuf, FileType)>, Error = std::io::Error>>>,
         to_visit: Vec<PathBuf>,
         files: Vec<PathBuf>,
     }
 
-    impl Future for SearchFuture {
-        type Item = Vec<PathBuf>;
+    impl Stream for SearchStream {
+        type Item = PathBuf;
         type Error = std::io::Error;
 
-        fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
-            match self.current.poll() {
-                Ok(Async::Ready(content)) => {
-                    for (entry, entry_type) in content {
-                        if entry_type.is_file() {
-                            self.files.push(entry);
-                        } else if entry_type.is_dir() {
-                            self.to_visit.push(entry);
+        fn poll(&mut self) -> Result<Async<Option<Self::Item>>, Self::Error> {
+            if !self.files.is_empty() {
+                // a file is readily available
+                Ok(Async::Ready(Some(self.files.remove(0))))
+            } else if let Some(mut task) = self.current.as_mut() {
+                // no ready files, but there is a task running
+                match task.poll() {
+                    Ok(Async::Ready(content)) => {
+                        for (entry, entry_type) in content {
+                            if entry_type.is_file() {
+                                self.files.push(entry);
+                            } else if entry_type.is_dir() {
+                                self.to_visit.push(entry);
+                            }
                         }
-                    }
-                    if self.to_visit.is_empty() {
-                        Ok(Async::Ready(self.files.clone()))
-                    } else {
-                        self.current = Box::new(read_dir(self.to_visit.remove(0)));
+                        if self.to_visit.is_empty() {
+                            self.current = None;
+                        } else {
+                            self.current = Some(Box::new(read_dir(self.to_visit.remove(0))));
+                        }
                         self.poll()
                     }
+                    Ok(Async::NotReady) => Ok(Async::NotReady),
+                    Err(e) => Err(e),
                 }
-                Ok(Async::NotReady) => Ok(Async::NotReady),
-                Err(e) => Err(e),
+            } else {
+                // end of stream
+                Ok(Async::Ready(None))
             }
-            // take each task, see if result is available
-            // create new tasks and files
-            // complete if all completed
         }
     }
 
-    unsafe impl Send for SearchFuture {}
+    unsafe impl Send for SearchStream {}
 
     fn read_dir(
         path: PathBuf,
@@ -229,7 +191,7 @@ mod search {
 
         #[test]
         fn read_test_data() {
-            let output = block_on(files_in_path("test_data/"));
+            let output = block_on(files_in_path("test_data/").collect());
             assert_eq!(
                 output,
                 vec![
