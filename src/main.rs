@@ -236,6 +236,7 @@ mod search {
                     PathBuf::from("test_data/prefix_of_test_hash.txt"),
                     PathBuf::from("test_data/empty_file.txt"),
                     PathBuf::from("test_data/test_hash.txt"),
+                    PathBuf::from("test_data/sub_directory/copy_of_test_hash.txt"),
                 ]
             );
         }
