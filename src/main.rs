@@ -1,18 +1,109 @@
+use std::collections::HashMap;
+use std::path::PathBuf;
 use tokio::prelude::*;
 
 fn main() {
-    let go = search::files_in_path("test_data").and_then(|path| {
-        tokio_fs::File::open(path.clone()).and_then(|handle| {
-            hash::first(handle, 10).map(|h| {
-                (path, h)
+    let base_path = "test_data";
+    const FIRST_N_BYTES: usize = 10;
+    let paths_by_hash = search::files_in_path(base_path)
+        .and_then(|path| {
+            tokio_fs::File::open(path.clone())
+                .and_then(|handle| hash::first(handle, FIRST_N_BYTES).map(|h| (path, h)))
+        })
+        .collect()
+        .map(|result| {
+            let mut paths_by_hash: HashMap<u64, Vec<PathBuf>> = HashMap::new();
+            for (path, h) in result {
+                if !paths_by_hash.contains_key(&h) {
+                    paths_by_hash.insert(h, vec![]);
+                }
+                paths_by_hash.get_mut(&h).unwrap().push(path);
+            }
+            paths_by_hash
+        });
+    let go = paths_by_hash
+        .and_then(move |map| {
+            search::files_in_path(base_path).and_then(|path| {
+                tokio_fs::File::open(path.clone()).and_then(|handle| {
+                    hash::first(handle, FIRST_N_BYTES).map(|h| {
+                        (path, h)
+                    })
+                })
+            }).collect().map(move |files| {
+                for (path, h) in files {
+                    if let Some(entries) = map.get(&h) {
+                        for entry in entries {
+                            if entry != &path {
+                                println!("potential duplicate: {:?} vs {:?}", path, entry);
+
+                            }
+                        }
+                    }
+                }
             })
         })
-    }).collect().map(|result| {
-        println!("result: {:?}", result);
-    }).map_err(|e| {
-        println!("error: {:?}", e);
-    });
+        .map(|result| {
+            println!("result: {:?}", result);
+        })
+        .map_err(|e| {
+            println!("error: {:?}", e);
+        });
     tokio::run(go);
+}
+
+mod compare {
+    use tokio::prelude::*;
+    use tokio::codec;
+
+    fn compare<R1, R2>(stream_a: R1, stream_b: R2) -> impl Future<Item = bool, Error = std::io::Error> where R1: AsyncRead + 'static, R2: AsyncRead + 'static {
+        let s_a = codec::FramedRead::new(stream_a, codec::BytesCodec::new())
+            .map(|bytes| stream::iter_ok(bytes))
+            .flatten();
+        let s_b = codec::FramedRead::new(stream_b, codec::BytesCodec::new())
+            .map(|bytes| stream::iter_ok(bytes))
+            .flatten();
+        let combined = s_a.zip(s_b);
+        CompareFuture {
+            combined: Box::new(combined)
+        }
+    }
+
+    pub struct CompareFuture {
+        combined: Box<dyn Stream<Item = (u8, u8), Error = std::io::Error>>,
+    }
+
+    impl Future for CompareFuture {
+        type Item = bool;
+        type Error = std::io::Error;
+
+        fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
+            match self.combined.poll() {
+                Ok(Async::Ready(Some((a, b)))) => {
+                    if a != b {
+                        Ok(Async::Ready(false))
+                    } else {
+                        self.poll()
+                    }
+                },
+                Ok(Async::Ready(None)) => Ok(Async::Ready(true)),
+                Ok(Async::NotReady) => Ok(Async::NotReady),
+                Err(err) => Err(err),
+            }
+        }
+    }
+
+    mod tests {
+        use super::*;
+        use tokio_fs;
+
+        #[test]
+        fn same_prefix_different_file() {
+            let result = tokio_fs::File::open("test_data/test_hash.txt").join(tokio_fs::File::open("test_data/prefix_of_test_hash.txt")).and_then(|(f1, f2)| {
+                compare(f1, f2)
+            });
+            
+        }
+    }
 }
 
 mod hash {
@@ -195,6 +286,31 @@ mod search {
             T: Send + 'static,
             E: Send + 'static,
             F: Future<Item = T, Error = E> + Send + 'static,
+        {
+            let result_holder: Arc<Mutex<Option<T>>> = Arc::new(Mutex::new(None));
+            let result_holder_write = result_holder.clone();
+            let task = future
+                .map(move |output| {
+                    result_holder_write.lock().map(|mut result| {
+                        *result = Some(output);
+                    });
+                })
+                .map_err(|e| panic!(e));
+            tokio::run(task);
+            let result: Option<T> = result_holder.lock().unwrap().take();
+            result.unwrap()
+        }
+    }
+
+    pub mod utils {
+        use tokio::prelude::*;
+        use std::sync::{Arc, Mutex};
+
+        pub fn block_on<T, E, F>(future: F) -> T
+            where
+                T: Send + 'static,
+                E: Send + 'static,
+                F: Future<Item = T, Error = E> + Send + 'static,
         {
             let result_holder: Arc<Mutex<Option<T>>> = Arc::new(Mutex::new(None));
             let result_holder_write = result_holder.clone();
