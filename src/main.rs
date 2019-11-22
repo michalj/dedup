@@ -1,11 +1,11 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
 use async_std::{
+    fs::File,
+    net::{TcpListener, ToSocketAddrs},
     prelude::*,
     task,
-    net::{TcpListener, ToSocketAddrs},
-    fs::File,
 };
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 fn main() {
     task::block_on(async {
@@ -17,108 +17,153 @@ fn main() {
         }
         println!("end of input");
     });
-//    let base_path = "test_data";
-//    const FIRST_N_BYTES: usize = 10;
-//    let paths_by_hash = search::files_in_path(base_path)
-//        .and_then(|path| {
-//            tokio_fs::File::open(path.clone())
-//                .and_then(|handle| hash::first(handle, FIRST_N_BYTES).map(|h| (path, h)))
-//        })
-//        .collect()
-//        .map(|result| {
-//            let mut paths_by_hash: HashMap<u64, Vec<PathBuf>> = HashMap::new();
-//            for (path, h) in result {
-//                if !paths_by_hash.contains_key(&h) {
-//                    paths_by_hash.insert(h, vec![]);
-//                }
-//                paths_by_hash.get_mut(&h).unwrap().push(path);
-//            }
-//            paths_by_hash
-//        });
-//    let go = paths_by_hash
-//        .and_then(move |map| {
-//            search::files_in_path(base_path).and_then(|path| {
-//                tokio_fs::File::open(path.clone()).and_then(|handle| {
-//                    hash::first(handle, FIRST_N_BYTES).map(|h| {
-//                        (path, h)
-//                    })
-//                })
-//            }).collect().map(move |files| {
-//                for (path, h) in files {
-//                    if let Some(entries) = map.get(&h) {
-//                        for entry in entries {
-//                            if entry != &path {
-//                                println!("potential duplicate: {:?} vs {:?}", path, entry);
-//
-//                            }
-//                        }
-//                    }
-//                }
-//            })
-//        })
-//        .map(|result| {
-//            println!("result: {:?}", result);
-//        })
-//        .map_err(|e| {
-//            println!("error: {:?}", e);
-//        });
-//    task::block_on(go);
-//    //tokio::run(go);
+    //    let base_path = "test_data";
+    //    const FIRST_N_BYTES: usize = 10;
+    //    let paths_by_hash = search::files_in_path(base_path)
+    //        .and_then(|path| {
+    //            tokio_fs::File::open(path.clone())
+    //                .and_then(|handle| hash::first(handle, FIRST_N_BYTES).map(|h| (path, h)))
+    //        })
+    //        .collect()
+    //        .map(|result| {
+    //            let mut paths_by_hash: HashMap<u64, Vec<PathBuf>> = HashMap::new();
+    //            for (path, h) in result {
+    //                if !paths_by_hash.contains_key(&h) {
+    //                    paths_by_hash.insert(h, vec![]);
+    //                }
+    //                paths_by_hash.get_mut(&h).unwrap().push(path);
+    //            }
+    //            paths_by_hash
+    //        });
+    //    let go = paths_by_hash
+    //        .and_then(move |map| {
+    //            search::files_in_path(base_path).and_then(|path| {
+    //                tokio_fs::File::open(path.clone()).and_then(|handle| {
+    //                    hash::first(handle, FIRST_N_BYTES).map(|h| {
+    //                        (path, h)
+    //                    })
+    //                })
+    //            }).collect().map(move |files| {
+    //                for (path, h) in files {
+    //                    if let Some(entries) = map.get(&h) {
+    //                        for entry in entries {
+    //                            if entry != &path {
+    //                                println!("potential duplicate: {:?} vs {:?}", path, entry);
+    //
+    //                            }
+    //                        }
+    //                    }
+    //                }
+    //            })
+    //        })
+    //        .map(|result| {
+    //            println!("result: {:?}", result);
+    //        })
+    //        .map_err(|e| {
+    //            println!("error: {:?}", e);
+    //        });
+    //    task::block_on(go);
+    //    //tokio::run(go);
 }
 
 mod compare {
-//    use tokio::prelude::*;
-//    use tokio::codec;
-//
-//    fn compare<R1, R2>(stream_a: R1, stream_b: R2) -> impl Future<Item = bool, Error = std::io::Error> where R1: AsyncRead + 'static, R2: AsyncRead + 'static {
-//        let s_a = codec::FramedRead::new(stream_a, codec::BytesCodec::new())
-//            .map(|bytes| stream::iter_ok(bytes))
-//            .flatten();
-//        let s_b = codec::FramedRead::new(stream_b, codec::BytesCodec::new())
-//            .map(|bytes| stream::iter_ok(bytes))
-//            .flatten();
-//        let combined = s_a.zip(s_b);
-//        CompareFuture {
-//            combined: Box::new(combined)
-//        }
-//    }
-//
-//    pub struct CompareFuture {
-//        combined: Box<dyn Stream<Item = (u8, u8), Error = std::io::Error>>,
-//    }
-//
-//    impl Future for CompareFuture {
-//        type Item = bool;
-//        type Error = std::io::Error;
-//
-//        fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
-//            match self.combined.poll() {
-//                Ok(Async::Ready(Some((a, b)))) => {
-//                    if a != b {
-//                        Ok(Async::Ready(false))
-//                    } else {
-//                        self.poll()
-//                    }
-//                },
-//                Ok(Async::Ready(None)) => Ok(Async::Ready(true)),
-//                Ok(Async::NotReady) => Ok(Async::NotReady),
-//                Err(err) => Err(err),
-//            }
-//        }
-//    }
-//
-//    mod tests {
-//        use super::*;
-//        use tokio_fs;
-//
-//        #[test]
-//        fn same_prefix_different_file() {
-//            let result = tokio_fs::File::open("test_data/test_hash.txt").join(tokio_fs::File::open("test_data/prefix_of_test_hash.txt")).and_then(|(f1, f2)| {
-//                compare(f1, f2)
-//            });
-//
-//        }
-//    }
+    use async_std::{
+        fs::File,
+        net::{TcpListener, ToSocketAddrs},
+        prelude::*,
+        task,
+    };
+    use futures::AsyncRead;
+
+    pub async fn compare<R1: AsyncRead + Unpin, R2: AsyncRead + Unpin>(
+        mut stream_1: R1,
+        mut stream_2: R2,
+    ) -> Result<bool, std::io::Error> {
+        let mut buffer_1: [u8; 1024] = [0; 1024];
+        let mut buffer_2: [u8; 1024] = [0; 1024];
+        loop {
+            let read_1 = read_as_much(&mut stream_1, &mut buffer_1).await?;
+            let read_2 = read_as_much(&mut stream_2, &mut buffer_2).await?;
+            if read_1 != read_2 {
+                return Ok(false);
+            }
+            if read_1 == 0 {
+                return Ok(true);
+            }
+            if buffer_1[..read_1] != buffer_2[..read_1] {
+                return Ok(false);
+            }
+        }
+    }
+
+    async fn read_as_much<R: AsyncRead + Unpin>(
+        input: &mut R,
+        buffer: &mut [u8],
+    ) -> Result<usize, std::io::Error> {
+        let mut bytes_read = 0;
+        loop {
+            if bytes_read == buffer.len() {
+                break;
+            }
+            let r = input.read(&mut buffer[bytes_read..]).await?;
+            if r == 0 {
+                break;
+            }
+            bytes_read += r;
+        }
+        Ok(bytes_read)
+    }
+
+    mod tests {
+        use super::*;
+        use async_std::{
+            fs::File,
+            net::{TcpListener, ToSocketAddrs},
+            prelude::*,
+            task,
+        };
+
+        fn compare_sync(file_1: &str, file_2: &str) -> bool {
+            task::block_on(async {
+                compare(
+                    File::open(file_1).await.unwrap(),
+                    File::open(file_2).await.unwrap(),
+                )
+                .await
+                .unwrap()
+            })
+        }
+
+        #[test]
+        fn same_prefix_different_file() {
+            assert_eq!(
+                compare_sync(
+                    "test_data/test_hash.txt",
+                    "test_data/prefix_of_test_hash.txt"
+                ),
+                false
+            );
+        }
+
+        #[test]
+        fn same_file() {
+            assert_eq!(
+                compare_sync("test_data/test_hash.txt", "test_data/test_hash.txt"),
+                true
+            );
+        }
+
+        #[test]
+        fn same_content_file() {
+            assert_eq!(
+                compare_sync(
+                    "test_data/test_hash.txt",
+                    "test_data/sub_directory/copy_of_test_hash.txt"
+                ),
+                true
+            );
+        }
+    }
 }
 
 mod hash {
@@ -126,7 +171,10 @@ mod hash {
     use futures::AsyncRead;
     use std::cmp;
 
-    pub async fn first<T: AsyncRead + Unpin>(mut input: T, bytes: usize) -> Result<u64, std::io::Error> {
+    pub async fn first<T: AsyncRead + Unpin>(
+        mut input: T,
+        bytes: usize,
+    ) -> Result<u64, std::io::Error> {
         let mut buffer: [u8; 1024] = [0; 1024];
         let mut hash: u64 = 0;
         let mut bytes_to_process = bytes;
@@ -175,13 +223,13 @@ mod hash {
 
 mod search {
     use async_std::{fs, fs::File, io, prelude::*, task};
-    use futures::Stream;
     use futures::channel::mpsc;
     use futures::sink::SinkExt;
-    use std::path::PathBuf;
+    use futures::Stream;
     use std::collections::VecDeque;
+    use std::path::PathBuf;
 
-    pub fn search<P: Into<PathBuf>>(path: P) -> impl Stream<Item=PathBuf> {
+    pub fn search<P: Into<PathBuf>>(path: P) -> impl Stream<Item = PathBuf> {
         let path = path.into();
         let (mut sender, receiver) = mpsc::unbounded();
         task::spawn(async move {
@@ -206,9 +254,9 @@ mod search {
 
     mod tests {
         use super::*;
-        use std::sync::{Arc, Mutex};
         use async_std::{fs, fs::File, io, prelude::*, task};
         use futures::stream::StreamExt;
+        use std::sync::{Arc, Mutex};
 
         #[test]
         fn search_test_data() {
