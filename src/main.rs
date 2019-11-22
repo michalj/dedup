@@ -4,66 +4,49 @@ use async_std::{
     prelude::*,
     task,
 };
+use futures::join;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 fn main() {
     task::block_on(async {
         let mut files = search::search("test_data");
+        let mut files_by_hash: HashMap<u64, Vec<PathBuf>> = HashMap::new();
         while let Some(item) = files.next().await {
             let input = File::open(&item).await.unwrap();
-            let h = hash::first(input, 10).await.unwrap();
+            let h = hash::first(input, 3).await.unwrap();
             println!("item: {:?}, hash: {}", item, h);
+            match files_by_hash.entry(h) {
+                Entry::Vacant(entry) => {
+                    entry.insert(vec![item]);
+                }
+                Entry::Occupied(mut entry) => {
+                    entry.get_mut().push(item);
+                }
+            }
         }
         println!("end of input");
+        println!("by_hash: {:?}", files_by_hash);
+        let mut new_files = search::search("test_data");
+        while let Some(item) = new_files.next().await {
+            let input = File::open(&item).await.unwrap();
+            let h = hash::first(input, 3).await.unwrap();
+            match files_by_hash.get(&h) {
+                None => {}
+                Some(files_with_same_hash) => {
+                    for file in files_with_same_hash {
+                        if file != &item {
+                            println!("potential duplicate: {:?} vs {:?}", file, item);
+                            let (i1, i2) = join!(File::open(file), File::open(&item));
+                            let result = compare::compare(i1.unwrap(), i2.unwrap()).await.unwrap();
+                            println!("compare = {:?}", result);
+                        }
+                    }
+                }
+            }
+        }
     });
-    //    let base_path = "test_data";
-    //    const FIRST_N_BYTES: usize = 10;
-    //    let paths_by_hash = search::files_in_path(base_path)
-    //        .and_then(|path| {
-    //            tokio_fs::File::open(path.clone())
-    //                .and_then(|handle| hash::first(handle, FIRST_N_BYTES).map(|h| (path, h)))
-    //        })
-    //        .collect()
-    //        .map(|result| {
-    //            let mut paths_by_hash: HashMap<u64, Vec<PathBuf>> = HashMap::new();
-    //            for (path, h) in result {
-    //                if !paths_by_hash.contains_key(&h) {
-    //                    paths_by_hash.insert(h, vec![]);
-    //                }
-    //                paths_by_hash.get_mut(&h).unwrap().push(path);
-    //            }
-    //            paths_by_hash
-    //        });
-    //    let go = paths_by_hash
-    //        .and_then(move |map| {
-    //            search::files_in_path(base_path).and_then(|path| {
-    //                tokio_fs::File::open(path.clone()).and_then(|handle| {
-    //                    hash::first(handle, FIRST_N_BYTES).map(|h| {
-    //                        (path, h)
-    //                    })
-    //                })
-    //            }).collect().map(move |files| {
-    //                for (path, h) in files {
-    //                    if let Some(entries) = map.get(&h) {
-    //                        for entry in entries {
-    //                            if entry != &path {
-    //                                println!("potential duplicate: {:?} vs {:?}", path, entry);
-    //
-    //                            }
-    //                        }
-    //                    }
-    //                }
-    //            })
-    //        })
-    //        .map(|result| {
-    //            println!("result: {:?}", result);
-    //        })
-    //        .map_err(|e| {
-    //            println!("error: {:?}", e);
-    //        });
-    //    task::block_on(go);
-    //    //tokio::run(go);
 }
 
 mod compare {
