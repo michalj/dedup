@@ -8,15 +8,27 @@ use futures::join;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use structopt::StructOpt;
+use log::*;
+
+#[derive(StructOpt)]
+struct Cli {
+    #[structopt(parse(from_os_str))]
+    base_directory: std::path::PathBuf,
+    #[structopt(parse(from_os_str))]
+    new_directory: std::path::PathBuf,
+}
 
 fn main() {
+    let args = Cli::from_args();
+
     task::block_on(async {
-        let mut files = search::search("test_data");
+        let mut files = search::search(args.base_directory);
         let mut files_by_hash: HashMap<u64, Vec<PathBuf>> = HashMap::new();
         while let Some(item) = files.next().await {
             let input = File::open(&item).await.unwrap();
             let h = hash::first(input, 3).await.unwrap();
-            println!("item: {:?}, hash: {}", item, h);
+            debug!("item: {:?}, hash: {}", item, h);
             match files_by_hash.entry(h) {
                 Entry::Vacant(entry) => {
                     entry.insert(vec![item]);
@@ -26,9 +38,9 @@ fn main() {
                 }
             }
         }
-        println!("end of input");
-        println!("by_hash: {:?}", files_by_hash);
-        let mut new_files = search::search("test_data");
+        println!("done indexing");
+        debug!("by_hash: {:?}", files_by_hash);
+        let mut new_files = search::search(args.new_directory);
         while let Some(item) = new_files.next().await {
             let input = File::open(&item).await.unwrap();
             let h = hash::first(input, 3).await.unwrap();
@@ -37,10 +49,13 @@ fn main() {
                 Some(files_with_same_hash) => {
                     for file in files_with_same_hash {
                         if file != &item {
-                            println!("potential duplicate: {:?} vs {:?}", file, item);
+                            debug!("potential duplicate: {:?} vs {:?}", file, item);
                             let (i1, i2) = join!(File::open(file), File::open(&item));
                             let result = compare::compare(i1.unwrap(), i2.unwrap()).await.unwrap();
-                            println!("compare = {:?}", result);
+                            debug!("compare = {:?}", result);
+                            if result {
+                                println!("duplicate: {:?} vs {:?}", file, item);
+                            }
                         }
                     }
                 }
