@@ -4,13 +4,16 @@ use async_std::{
     prelude::*,
     task,
     net::{TcpListener, ToSocketAddrs},
+    fs::File,
 };
 
 fn main() {
     task::block_on(async {
         let mut files = search::search("test_data");
         while let Some(item) = files.next().await {
-            println!("item: {:?}", item);
+            let input = File::open(&item).await.unwrap();
+            let h = hash::first(input, 10).await.unwrap();
+            println!("item: {:?}, hash: {}", item, h);
         }
         println!("end of input");
     });
@@ -119,93 +122,55 @@ mod compare {
 }
 
 mod hash {
-//    use std::task::{Context, Poll};
-//    use std::cmp::min;
-//    use tokio::prelude::*;
-//
-//    pub fn first<T: AsyncRead>(input: T, bytes: usize) -> HashFuture<T> {
-//        HashFuture {
-//            stream: input,
-//            bytes_left: bytes,
-//            hash: 0,
-//        }
-//    }
-//
-//    pub struct HashFuture<T> {
-//        stream: T,
-//        bytes_left: usize,
-//        hash: u64,
-//    }
-//
-//    impl<T: AsyncRead> Future for HashFuture<T> {
-//        type Output = Result<u64, std::io::Error>;
-//
-//        fn poll(self, cx: &mut Context) -> Poll<Self::Output> {
-//            unimplemented!()
-//        }
-//
-////        fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
-////            let mut buffer: [u8; 1024] = [0; 1024];
-////            let read = self.stream.poll_read(&mut buffer);
-////            match read {
-////                Ok(Async::Ready(bytes_read)) => {
-////                    if bytes_read == 0 {
-////                        Ok(Async::Ready(self.hash))
-////                    } else {
-////                        let bytes_to_process = min(self.bytes_left, bytes_read);
-////                        self.bytes_left -= bytes_to_process;
-////                        for i in 0..bytes_to_process {
-////                            self.hash =
-////                                (self.hash * 21 + buffer[i] as u64 * 27 + 7) % 23436734059613;
-////                        }
-////                        if self.bytes_left == 0 {
-////                            Ok(Async::Ready(self.hash))
-////                        } else {
-////                            self.poll()
-////                        }
-////                    }
-////                }
-////                Ok(Async::NotReady) => Ok(Async::NotReady),
-////                Err(e) => Err(e),
-////            }
-////        }
-//    }
-//
-//    mod tests {
-//        use super::*;
-//        use std::sync::{Arc, Mutex};
-//        use tokio_fs::File;
-//
-//        fn hash_file(name: &str, first_bytes: usize) -> u64 {
-//            // TODO: use tokio-test instead
-//            let hash_holder: Arc<Mutex<u64>> = Arc::new(Mutex::new(0));
-//            let hash_holder_write = hash_holder.clone();
-//            let future = File::open(name.to_owned())
-//                .and_then(move |stream| first(stream, first_bytes))
-//                .map(move |hash| {
-//                    hash_holder_write.lock().map(|mut result| {
-//                        *result = hash;
-//                    });
-//                })
-//                .map_err(|e| panic!(e));
-//            tokio::run(future);
-//            let result: u64 = *hash_holder.lock().unwrap();
-//            result
-//        }
-//
-//        #[test]
-//        fn empty_file_should_hash_to_0() {
-//            assert_eq!(0, hash_file("test_data/empty_file.txt", 1024));
-//        }
-//
-//        #[test]
-//        fn files_should_have_same_hash_given_same_prefix() {
-//            assert_eq!(
-//                hash_file("test_data/test_hash.txt", 3),
-//                hash_file("test_data/prefix_of_test_hash.txt", 3)
-//            );
-//        }
-//    }
+    use async_std::{fs, fs::File, io, prelude::*, task};
+    use futures::AsyncRead;
+    use std::cmp;
+
+    pub async fn first<T: AsyncRead + Unpin>(mut input: T, bytes: usize) -> Result<u64, std::io::Error> {
+        let mut buffer: [u8; 1024] = [0; 1024];
+        let mut hash: u64 = 0;
+        let mut bytes_to_process = bytes;
+        loop {
+            let bytes_read = input.read(&mut buffer).await?;
+            if bytes_read == 0 {
+                break;
+            }
+            let bytes_to_hash = cmp::min(bytes_to_process, bytes_read);
+            for i in 0..bytes_to_hash {
+                hash = (hash * 21 + buffer[i] as u64 * 27 + 7) % 23436734059613;
+            }
+            bytes_to_process -= bytes_to_hash;
+            if bytes_to_process == 0 {
+                break;
+            }
+        }
+        Ok(hash)
+    }
+
+    mod tests {
+        use super::*;
+        use async_std::{fs, fs::File, io, prelude::*, task};
+
+        fn hash_file(name: &str, first_bytes: usize) -> u64 {
+            task::block_on(async {
+                let mut input = File::open(name.to_owned()).await.unwrap();
+                first(input, first_bytes).await.unwrap()
+            })
+        }
+
+        #[test]
+        fn empty_file_should_hash_to_0() {
+            assert_eq!(0, hash_file("test_data/empty_file.txt", 1024));
+        }
+
+        #[test]
+        fn files_should_have_same_hash_given_same_prefix() {
+            assert_eq!(
+                hash_file("test_data/test_hash.txt", 3),
+                hash_file("test_data/prefix_of_test_hash.txt", 3)
+            );
+        }
+    }
 }
 
 mod search {
@@ -216,7 +181,7 @@ mod search {
     use std::path::PathBuf;
     use std::collections::VecDeque;
 
-    pub fn search<P: Into<PathBuf>>(path: P) -> impl Stream<Item = PathBuf> {
+    pub fn search<P: Into<PathBuf>>(path: P) -> impl Stream<Item=PathBuf> {
         let path = path.into();
         let (mut sender, receiver) = mpsc::unbounded();
         task::spawn(async move {
