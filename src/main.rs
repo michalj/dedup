@@ -25,6 +25,9 @@ struct Cli {
     /// Ignore empty files
     #[structopt(short = "i")]
     ignore_empty_files: bool,
+    /// Show original files instead of duplicates
+    #[structopt(short = "o"]
+    show_original_files: bool,
 }
 
 fn main() {
