@@ -13,21 +13,29 @@ use log::*;
 
 #[derive(StructOpt)]
 struct Cli {
+    /// Base directory
     #[structopt(parse(from_os_str))]
     base_directory: std::path::PathBuf,
+    /// Directory in which to look for duplicates
     #[structopt(parse(from_os_str))]
     new_directory: std::path::PathBuf,
+    /// Length of prefix to be hashed
+    #[structopt(short = "h", default_value = "512")]
+    hash_prefix: usize,
+    /// Ignore empty files
+    #[structopt(short = "i")]
+    ignore_empty_files: bool,
 }
 
 fn main() {
     let args = Cli::from_args();
 
     task::block_on(async {
-        let mut files = search::search(args.base_directory);
+        let mut files = search::search(args.base_directory, args.ignore_empty_files);
         let mut files_by_hash: HashMap<u64, Vec<PathBuf>> = HashMap::new();
         while let Some(item) = files.next().await {
             let input = File::open(&item).await.unwrap();
-            let h = hash::first(input, 3).await.unwrap();
+            let h = hash::first(input, args.hash_prefix).await.unwrap();
             debug!("item: {:?}, hash: {}", item, h);
             match files_by_hash.entry(h) {
                 Entry::Vacant(entry) => {
@@ -38,12 +46,12 @@ fn main() {
                 }
             }
         }
-        println!("done indexing");
+        println!("done indexing, {} entries", files_by_hash.len());
         debug!("by_hash: {:?}", files_by_hash);
-        let mut new_files = search::search(args.new_directory);
+        let mut new_files = search::search(args.new_directory, args.ignore_empty_files);
         while let Some(item) = new_files.next().await {
             let input = File::open(&item).await.unwrap();
-            let h = hash::first(input, 3).await.unwrap();
+            let h = hash::first(input, args.hash_prefix).await.unwrap();
             match files_by_hash.get(&h) {
                 None => {}
                 Some(files_with_same_hash) => {
@@ -227,7 +235,7 @@ mod search {
     use std::collections::VecDeque;
     use std::path::PathBuf;
 
-    pub fn search<P: Into<PathBuf>>(path: P) -> impl Stream<Item = PathBuf> {
+    pub fn search<P: Into<PathBuf>>(path: P, ignore_empty_files: bool) -> impl Stream<Item = PathBuf> {
         let path = path.into();
         let (mut sender, receiver) = mpsc::unbounded();
         task::spawn(async move {
@@ -258,7 +266,7 @@ mod search {
 
         #[test]
         fn search_test_data() {
-            let output: Vec<PathBuf> = task::block_on(search("test_data/").collect());
+            let output: Vec<PathBuf> = task::block_on(search("test_data/", false).collect());
             assert_eq!(
                 output,
                 vec![
