@@ -1,6 +1,5 @@
 use async_std::{
     fs::File,
-    net::{TcpListener, ToSocketAddrs},
     prelude::*,
     task,
 };
@@ -56,7 +55,11 @@ fn main() {
             let input = File::open(&item).await.unwrap();
             let h = hash::first(input, args.hash_prefix).await.unwrap();
             match files_by_hash.get(&h) {
-                None => {}
+                None => {
+                    if args.show_original_files {
+                        println!("original file: {:?}", item);
+                    }
+                }
                 Some(files_with_same_hash) => {
                     for file in files_with_same_hash {
                         if file != &item {
@@ -65,7 +68,13 @@ fn main() {
                             let result = compare::compare(i1.unwrap(), i2.unwrap()).await.unwrap();
                             debug!("compare = {:?}", result);
                             if result {
-                                println!("duplicate: {:?} vs {:?}", file, item);
+                                if !args.show_original_files {
+                                    println!("duplicate: {:?} vs {:?}", file, item);
+                                }
+                            } else {
+                                if args.show_original_files {
+                                    println!("original file: {:?}", item);
+                                }
                             }
                         }
                     }
@@ -76,12 +85,7 @@ fn main() {
 }
 
 mod compare {
-    use async_std::{
-        fs::File,
-        net::{TcpListener, ToSocketAddrs},
-        prelude::*,
-        task,
-    };
+    use async_std::prelude::*;
     use futures::AsyncRead;
 
     pub async fn compare<R1: AsyncRead + Unpin, R2: AsyncRead + Unpin>(
@@ -123,6 +127,7 @@ mod compare {
         Ok(bytes_read)
     }
 
+    #[cfg(test)]
     mod tests {
         use super::*;
         use async_std::{
@@ -176,7 +181,7 @@ mod compare {
 }
 
 mod hash {
-    use async_std::{fs, fs::File, io, prelude::*, task};
+    use async_std::prelude::*;
     use futures::AsyncRead;
     use std::cmp;
 
@@ -204,6 +209,7 @@ mod hash {
         Ok(hash)
     }
 
+    #[cfg(test)]
     mod tests {
         use super::*;
         use async_std::{fs, fs::File, io, prelude::*, task};
@@ -231,7 +237,7 @@ mod hash {
 }
 
 mod search {
-    use async_std::{fs, fs::File, io, prelude::*, task};
+    use async_std::{fs, prelude::*, task};
     use futures::channel::mpsc;
     use futures::sink::SinkExt;
     use futures::Stream;
@@ -269,6 +275,7 @@ mod search {
         receiver
     }
 
+    #[cfg(test)]
     mod tests {
         use super::*;
         use async_std::{fs, fs::File, io, prelude::*, task};
