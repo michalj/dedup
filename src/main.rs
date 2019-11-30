@@ -253,7 +253,15 @@ mod search {
                     if file_type.is_dir() {
                         queue.push_back(path.into());
                     } else if file_type.is_file() {
-                        sender.send(path.into()).await.unwrap();
+                        let ignore_file = if ignore_empty_files {
+                            let meta = entry.metadata().await.unwrap();
+                            meta.len() == 0
+                        } else {
+                            false
+                        };
+                        if !ignore_file {
+                            sender.send(path.into()).await.unwrap();
+                        }
                     }
                 }
             }
