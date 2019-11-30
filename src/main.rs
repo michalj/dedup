@@ -33,21 +33,8 @@ fn main() {
     let args = Cli::from_args();
 
     task::block_on(async {
-        let mut files = search::search(args.base_directory, args.ignore_empty_files);
-        let mut files_by_hash: HashMap<u64, Vec<PathBuf>> = HashMap::new();
-        while let Some(item) = files.next().await {
-            let input = File::open(&item).await.unwrap();
-            let h = hash::first(input, args.hash_prefix).await.unwrap();
-            debug!("item: {:?}, hash: {}", item, h);
-            match files_by_hash.entry(h) {
-                Entry::Vacant(entry) => {
-                    entry.insert(vec![item]);
-                }
-                Entry::Occupied(mut entry) => {
-                    entry.get_mut().push(item);
-                }
-            }
-        }
+        let files = search::search(args.base_directory, args.ignore_empty_files);
+        let files_by_hash = files_by_hash(files, args.hash_prefix).await;
         println!("done indexing, {} entries", files_by_hash.len());
         debug!("by_hash: {:?}", files_by_hash);
         let mut new_files = search::search(args.new_directory, args.ignore_empty_files);
@@ -82,6 +69,30 @@ fn main() {
             }
         }
     });
+}
+
+async fn files_by_hash<T>(mut files: T, hash_prefix: usize) -> HashMap<u64, Vec<PathBuf>> where T: Stream<Item = PathBuf> + Unpin {
+    let mut files_by_hash: HashMap<u64, Vec<PathBuf>> = HashMap::new();
+    while let Some(item) = files.next().await {
+         match File::open(&item).await {
+             Ok(input) => {
+                 let h = hash::first(input, hash_prefix).await.unwrap();
+                 debug!("item: {:?}, hash: {}", item, h);
+                 match files_by_hash.entry(h) {
+                     Entry::Vacant(entry) => {
+                         entry.insert(vec![item]);
+                     }
+                     Entry::Occupied(mut entry) => {
+                         entry.get_mut().push(item);
+                     }
+                 }
+             },
+             Err(e) => {
+                 eprintln!("Cannot open file {:?}, skipping. Reason: {:?}", item, e);
+             }
+         }
+    }
+    files_by_hash
 }
 
 mod compare {
