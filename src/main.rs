@@ -262,23 +262,29 @@ mod search {
             let mut queue = VecDeque::new();
             queue.push_back(path);
             while let Some(path) = queue.pop_front() {
-                let mut dir = fs::read_dir(path).await.unwrap();
-                while let Some(res) = dir.next().await {
-                    let entry = res.unwrap();
-                    let path = entry.path();
-                    let file_type = entry.file_type().await.unwrap();
-                    if file_type.is_dir() {
-                        queue.push_back(path.into());
-                    } else if file_type.is_file() {
-                        let ignore_file = if ignore_empty_files {
-                            let meta = entry.metadata().await.unwrap();
-                            meta.len() == 0
-                        } else {
-                            false
-                        };
-                        if !ignore_file {
-                            sender.send(path.into()).await.unwrap();
+                match fs::read_dir(&path).await {
+                    Ok(mut dir) => {
+                        while let Some(res) = dir.next().await {
+                            let entry = res.unwrap();
+                            let path = entry.path();
+                            let file_type = entry.file_type().await.unwrap();
+                            if file_type.is_dir() {
+                                queue.push_back(path.into());
+                            } else if file_type.is_file() {
+                                let ignore_file = if ignore_empty_files {
+                                    let meta = entry.metadata().await.unwrap();
+                                    meta.len() == 0
+                                } else {
+                                    false
+                                };
+                                if !ignore_file {
+                                    sender.send(path.into()).await.unwrap();
+                                }
+                            }
                         }
+                    },
+                    Err(e) => {
+                        eprintln!("Could not read directory: {:?}. Reason: {:?}", path, e);
                     }
                 }
             }
