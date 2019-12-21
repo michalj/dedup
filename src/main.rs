@@ -5,6 +5,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use structopt::StructOpt;
+use indicatif::ProgressBar;
 
 #[derive(StructOpt)]
 struct Cli {
@@ -29,18 +30,27 @@ fn main() {
     let args = Cli::from_args();
 
     task::block_on(async {
+        println!("counting files ...");
+        let base_file_count = count_files(search::search(&args.base_directory, args.ignore_empty_files)).await;
+        let new_file_count = count_files(search::search(&args.new_directory, args.ignore_empty_files)).await;
+        println!("base size = {}, new size = {}", base_file_count, new_file_count);
+        let indexing_bar = ProgressBar::new(base_file_count as u64);
         let files = search::search(args.base_directory, args.ignore_empty_files);
-        let files_by_hash = files_by_hash(files, args.hash_prefix).await;
+        let files_by_hash = files_by_hash(files, args.hash_prefix, indexing_bar).await;
         println!("done indexing, {} entries", files_by_hash.len());
         debug!("by_hash: {:?}", files_by_hash);
+        let main_bar = ProgressBar::new(new_file_count as u64);
         let mut new_files = search::search(args.new_directory, args.ignore_empty_files);
+        let mut counter = 0;
         while let Some(item) = new_files.next().await {
+            main_bar.set_position(counter);
+            counter += 1;
             let input = File::open(&item).await.unwrap();
             let h = hash::first(input, args.hash_prefix).await.unwrap();
             match files_by_hash.get(&h) {
                 None => {
                     if args.show_original_files {
-                        println!("original file: {:?}", item);
+                        main_bar.println(format!("original file: {:?}", item));
                     }
                 }
                 Some(files_with_same_hash) => {
@@ -54,13 +64,13 @@ fn main() {
                             if result {
                                 has_duplicate = true;
                                 if !args.show_original_files {
-                                    println!("duplicate: {:?} vs {:?}", file, item);
+                                    main_bar.println(format!("duplicate: {:?} vs {:?}", file, item));
                                 }
                             }
                         }
                     }
                     if args.show_original_files && !has_duplicate {
-                        println!("original file: {:?}", item);
+                        main_bar.println(format!("original file: {:?}", item));
                     }
                 }
             }
@@ -68,12 +78,24 @@ fn main() {
     });
 }
 
-async fn files_by_hash<T>(mut files: T, hash_prefix: usize) -> HashMap<u64, Vec<PathBuf>>
+async fn count_files<T>(mut files: T) -> usize where T: Stream<Item = PathBuf> + Unpin {
+    let mut counter = 0;
+    while let Some(_) = files.next().await {
+        counter += 1;
+    }
+    counter
+}
+
+async fn files_by_hash<T>(mut files: T, hash_prefix: usize, indicator: ProgressBar) -> HashMap<u64, Vec<PathBuf>>
 where
     T: Stream<Item = PathBuf> + Unpin,
 {
+    let mut counter = 0;
+    indicator.set_message("Indexing");
     let mut files_by_hash: HashMap<u64, Vec<PathBuf>> = HashMap::new();
     while let Some(item) = files.next().await {
+        indicator.set_position(counter);
+        counter += 1;
         match File::open(&item).await {
             Ok(input) => {
                 let h = hash::first(input, hash_prefix).await.unwrap();
