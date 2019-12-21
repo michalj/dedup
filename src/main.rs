@@ -144,8 +144,6 @@ mod compare {
         use super::*;
         use async_std::{
             fs::File,
-            net::{TcpListener, ToSocketAddrs},
-            prelude::*,
             task,
         };
 
@@ -224,11 +222,11 @@ mod hash {
     #[cfg(test)]
     mod tests {
         use super::*;
-        use async_std::{fs, fs::File, io, prelude::*, task};
+        use async_std::{fs::File, task};
 
         fn hash_file(name: &str, first_bytes: usize) -> u64 {
             task::block_on(async {
-                let mut input = File::open(name.to_owned()).await.unwrap();
+                let input = File::open(name.to_owned()).await.unwrap();
                 first(input, first_bytes).await.unwrap()
             })
         }
@@ -296,9 +294,8 @@ mod search {
     #[cfg(test)]
     mod tests {
         use super::*;
-        use async_std::{fs, fs::File, io, prelude::*, task};
+        use async_std::task;
         use futures::stream::StreamExt;
-        use std::sync::{Arc, Mutex};
 
         #[test]
         fn search_test_data() {
