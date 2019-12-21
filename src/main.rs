@@ -48,6 +48,7 @@ fn main() {
                     }
                 }
                 Some(files_with_same_hash) => {
+                    let mut has_duplicate = false;
                     for file in files_with_same_hash {
                         if file != &item {
                             debug!("potential duplicate: {:?} vs {:?}", file, item);
@@ -55,15 +56,15 @@ fn main() {
                             let result = compare::compare(i1.unwrap(), i2.unwrap()).await.unwrap();
                             debug!("compare = {:?}", result);
                             if result {
+                                has_duplicate = true;
                                 if !args.show_original_files {
                                     println!("duplicate: {:?} vs {:?}", file, item);
                                 }
-                            } else {
-                                if args.show_original_files {
-                                    println!("original file: {:?}", item);
-                                }
                             }
                         }
+                    }
+                    if args.show_original_files && !has_duplicate {
+                        println!("original file: {:?}", item);
                     }
                 }
             }
