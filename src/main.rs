@@ -1,14 +1,10 @@
-use async_std::{
-    fs::File,
-    prelude::*,
-    task,
-};
+use async_std::{fs::File, prelude::*, task};
 use futures::join;
+use log::*;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use structopt::StructOpt;
-use log::*;
 
 #[derive(StructOpt)]
 struct Cli {
@@ -72,26 +68,29 @@ fn main() {
     });
 }
 
-async fn files_by_hash<T>(mut files: T, hash_prefix: usize) -> HashMap<u64, Vec<PathBuf>> where T: Stream<Item = PathBuf> + Unpin {
+async fn files_by_hash<T>(mut files: T, hash_prefix: usize) -> HashMap<u64, Vec<PathBuf>>
+where
+    T: Stream<Item = PathBuf> + Unpin,
+{
     let mut files_by_hash: HashMap<u64, Vec<PathBuf>> = HashMap::new();
     while let Some(item) = files.next().await {
-         match File::open(&item).await {
-             Ok(input) => {
-                 let h = hash::first(input, hash_prefix).await.unwrap();
-                 debug!("item: {:?}, hash: {}", item, h);
-                 match files_by_hash.entry(h) {
-                     Entry::Vacant(entry) => {
-                         entry.insert(vec![item]);
-                     }
-                     Entry::Occupied(mut entry) => {
-                         entry.get_mut().push(item);
-                     }
-                 }
-             },
-             Err(e) => {
-                 eprintln!("Cannot open file {:?}, skipping. Reason: {:?}", item, e);
-             }
-         }
+        match File::open(&item).await {
+            Ok(input) => {
+                let h = hash::first(input, hash_prefix).await.unwrap();
+                debug!("item: {:?}, hash: {}", item, h);
+                match files_by_hash.entry(h) {
+                    Entry::Vacant(entry) => {
+                        entry.insert(vec![item]);
+                    }
+                    Entry::Occupied(mut entry) => {
+                        entry.get_mut().push(item);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Cannot open file {:?}, skipping. Reason: {:?}", item, e);
+            }
+        }
     }
     files_by_hash
 }
@@ -142,10 +141,7 @@ mod compare {
     #[cfg(test)]
     mod tests {
         use super::*;
-        use async_std::{
-            fs::File,
-            task,
-        };
+        use async_std::{fs::File, task};
 
         fn compare_sync(file_1: &str, file_2: &str) -> bool {
             task::block_on(async {
@@ -208,8 +204,8 @@ mod hash {
                 break;
             }
             let bytes_to_hash = cmp::min(bytes_to_process, bytes_read);
-            for i in 0..bytes_to_hash {
-                hash = (hash * 21 + buffer[i] as u64 * 27 + 7) % 23436734059613;
+            for byte in buffer[0..bytes_to_hash].iter() {
+                hash = (hash * 21 + (*byte as u64) * 27 + 7) % 23_436_734_059_613;
             }
             bytes_to_process -= bytes_to_hash;
             if bytes_to_process == 0 {
@@ -254,7 +250,10 @@ mod search {
     use std::collections::VecDeque;
     use std::path::PathBuf;
 
-    pub fn search<P: Into<PathBuf>>(path: P, ignore_empty_files: bool) -> impl Stream<Item = PathBuf> {
+    pub fn search<P: Into<PathBuf>>(
+        path: P,
+        ignore_empty_files: bool,
+    ) -> impl Stream<Item = PathBuf> {
         let path = path.into();
         let (mut sender, receiver) = mpsc::unbounded();
         task::spawn(async move {
@@ -281,7 +280,7 @@ mod search {
                                 }
                             }
                         }
-                    },
+                    }
                     Err(e) => {
                         eprintln!("Could not read directory: {:?}. Reason: {:?}", path, e);
                     }
